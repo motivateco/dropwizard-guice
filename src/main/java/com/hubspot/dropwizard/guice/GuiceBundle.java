@@ -8,6 +8,7 @@ import com.google.inject.Injector;
 import com.google.inject.Module;
 import com.google.inject.Stage;
 import com.google.inject.servlet.ServletModule;
+import com.squarespace.jersey2.guice.GuiceServiceLocatorGeneratorStub;
 import com.squarespace.jersey2.guice.JerseyGuiceModule;
 import com.squarespace.jersey2.guice.JerseyGuiceUtils;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
@@ -32,12 +33,14 @@ public class GuiceBundle<T extends Configuration> implements ConfiguredBundle<T>
     private DropwizardEnvironmentModule dropwizardEnvironmentModule;
     private Optional<Class<T>> configurationClass;
     private Stage stage;
+    private final boolean useGuiceServlets;
 
     public static class Builder<T extends Configuration> {
         private AutoConfig autoConfig;
         private List<Module> modules = Lists.newArrayList();
         private Optional<Class<T>> configurationClass = Optional.absent();
         private InjectorFactory injectorFactory = new InjectorFactoryImpl();
+        private boolean useGuiceServlets = true;
 
         public Builder<T> addModule(Module module) {
             Preconditions.checkNotNull(module);
@@ -63,12 +66,17 @@ public class GuiceBundle<T extends Configuration> implements ConfiguredBundle<T>
             return this;
         }
 
+        public Builder<T> useGuiceServlets(boolean useGuiceServlets) {
+            this.useGuiceServlets = useGuiceServlets;
+            return this;
+        }
+
         public GuiceBundle<T> build() {
             return build(Stage.PRODUCTION);
         }
 
         public GuiceBundle<T> build(Stage s) {
-            return new GuiceBundle<>(s, autoConfig, modules, configurationClass, injectorFactory);
+            return new GuiceBundle<>(s, autoConfig, modules, configurationClass, injectorFactory, useGuiceServlets);
         }
 
     }
@@ -77,7 +85,7 @@ public class GuiceBundle<T extends Configuration> implements ConfiguredBundle<T>
         return new Builder<>();
     }
 
-    private GuiceBundle(Stage stage, AutoConfig autoConfig, List<Module> modules, Optional<Class<T>> configurationClass, InjectorFactory injectorFactory) {
+    private GuiceBundle(Stage stage, AutoConfig autoConfig, List<Module> modules, Optional<Class<T>> configurationClass, InjectorFactory injectorFactory, boolean useGuiceServlets) {
         Preconditions.checkNotNull(modules);
         Preconditions.checkArgument(!modules.isEmpty());
         Preconditions.checkNotNull(stage);
@@ -86,6 +94,7 @@ public class GuiceBundle<T extends Configuration> implements ConfiguredBundle<T>
         this.configurationClass = configurationClass;
         this.injectorFactory = injectorFactory;
         this.stage = stage;
+        this.useGuiceServlets = useGuiceServlets;
     }
 
     @Override
@@ -96,7 +105,9 @@ public class GuiceBundle<T extends Configuration> implements ConfiguredBundle<T>
             dropwizardEnvironmentModule = new DropwizardEnvironmentModule<>(Configuration.class);
         }
         modules.add(dropwizardEnvironmentModule);
-        modules.add(new ServletModule());
+        if (useGuiceServlets) {
+            modules.add(new ServletModule());
+        }
 
         initInjector();
         JerseyGuiceUtils.install(new ServiceLocatorGenerator() {
@@ -106,7 +117,7 @@ public class GuiceBundle<T extends Configuration> implements ConfiguredBundle<T>
                     return null;
                 }
 
-                return baseInjector.createChildInjector(new JerseyGuiceModule(name))
+                return baseInjector.createChildInjector(new JerseyGuiceModule(name, useGuiceServlets))
                         .getInstance(ServiceLocator.class);
             }
         });
@@ -144,6 +155,6 @@ public class GuiceBundle<T extends Configuration> implements ConfiguredBundle<T>
 
     public Injector getInjector() {
         Preconditions.checkState(baseInjector != null, "injector is only available after com.hubspot.dropwizard.guice.GuiceBundle.initialize() is called");
-        return baseInjector.createChildInjector(new JerseyGuiceModule(JerseyGuiceUtils.newServiceLocator()));
+        return baseInjector.createChildInjector(new JerseyGuiceModule(JerseyGuiceUtils.newServiceLocator(), useGuiceServlets));
     }
 }
